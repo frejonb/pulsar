@@ -81,6 +81,36 @@ public class ElasticSearchConfig implements Serializable {
         help = "The password used by the connector to connect to the elastic search cluster. If password is set, a username should also be provided"
     )
     private String password;
+    
+    @FieldDoc(
+        required = false,
+        defaultValue = "",
+        help = "The path to the JKS truststore"
+        )
+        private String trustStore;
+
+    @FieldDoc(
+        required = false,
+        defaultValue = "",
+        sensitive = true,
+        help = "The JKS truststore password"
+    )
+    private String trustStorePass;
+
+    @FieldDoc(
+        required = false,
+        defaultValue = "",
+        help = "The path to the JKS identitystore"
+        )
+        private String identityStore;
+
+    @FieldDoc(
+        required = false,
+        defaultValue = "",
+        sensitive = true,
+        help = "The JKS identitystore password"
+    )
+    private String identityStorePass;
 
     public static ElasticSearchConfig load(String yamlFile) throws IOException {
         ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
@@ -108,6 +138,16 @@ public class ElasticSearchConfig implements Serializable {
 
         if (indexNumberOfReplicas < 0) {
             throw new IllegalArgumentException("indexNumberOfReplicas must be a positive integer");
+        }
+
+        if (StringUtils.isNotEmpty(trustStorePass) && StringUtils.isEmpty(trustStore)
+           || (StringUtils.isEmpty(trustStorePass) && StringUtils.isNotEmpty(trustStore))) {
+            throw new IllegalArgumentException("Both trustStore and trustStorePass must be provided for mTLS authentication.");
+        }
+
+        if (StringUtils.isNotEmpty(identityStorePass) && StringUtils.isEmpty(identityStore)
+           || (StringUtils.isEmpty(identityStorePass) && StringUtils.isNotEmpty(identityStore))) {
+            throw new IllegalArgumentException("Both identityStore and identityStorePass must be provided for mTLS authentication.");
         }
     }
 }

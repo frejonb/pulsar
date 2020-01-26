@@ -18,17 +18,26 @@
  */
 package org.apache.pulsar.io.elasticsearch;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.security.KeyStore;
 import java.util.Map;
+
+import javax.net.ssl.SSLContext;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
+import org.apache.http.ssl.SSLContexts;
 import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.pulsar.functions.api.Record;
 import org.apache.pulsar.io.core.KeyValue;
 import org.apache.pulsar.io.core.Sink;
@@ -144,15 +153,55 @@ public class ElasticSearchSink implements Sink<byte[]> {
         return credentialsProvider;
     }
 
-    private RestHighLevelClient getClient() throws MalformedURLException {
+    private SSLContext getSSLContext() throws IOException {
+
+        if (StringUtils.isEmpty(elasticSearchConfig.getIdentityStore())
+            || StringUtils.isEmpty(elasticSearchConfig.getIdentityStorePass())) {
+            return null;
+        }
+
+        try {
+            KeyStore identityKeyStore = KeyStore.getInstance("jks");
+            FileInputStream identityKeyStoreFile = new FileInputStream(new File(elasticSearchConfig.getIdentityStore()));
+            identityKeyStore.load(identityKeyStoreFile, elasticSearchConfig.getIdentityStorePass().toCharArray());
+
+            SSLContextBuilder sslContextBuilder = SSLContexts.custom()
+            .loadKeyMaterial(identityKeyStore, elasticSearchConfig.getIdentityStorePass().toCharArray());
+
+            if (StringUtils.isNotEmpty(elasticSearchConfig.getTrustStore())
+                || StringUtils.isNotEmpty(elasticSearchConfig.getTrustStorePass())) {
+                KeyStore trustKeyStore = KeyStore.getInstance("jks");
+                FileInputStream trustKeyStoreFile = new FileInputStream(new File(elasticSearchConfig.getTrustStore()));
+                trustKeyStore.load(trustKeyStoreFile, elasticSearchConfig.getTrustStorePass().toCharArray());
+
+                sslContextBuilder.loadTrustMaterial(trustKeyStore, null);
+            }
+    
+            SSLContext sslContext = sslContextBuilder.build();
+    
+            return sslContext;
+        } catch (Exception e) {
+            throw new IOException(e.getMessage());
+        }
+    }
+
+    private RestHighLevelClient getClient() throws IOException {
         if (client == null) {
           CredentialsProvider cp = getCredentialsProvider();
+          SSLContext sslContext = getSSLContext();
           RestClientBuilder builder = RestClient.builder(new HttpHost(getUrl().getHost(),
                   getUrl().getPort(), getUrl().getProtocol()));
-
-          if (cp != null) {
+          if (cp != null && sslContext != null) {
+            builder.setHttpClientConfigCallback(httpClientBuilder ->
+            httpClientBuilder.setDefaultCredentialsProvider(cp).setSSLContext(sslContext));
+          }
+          else if (cp != null && sslContext == null) {
               builder.setHttpClientConfigCallback(httpClientBuilder ->
               httpClientBuilder.setDefaultCredentialsProvider(cp));
+          }
+          else if (sslContext != null && cp == null) {
+              builder.setHttpClientConfigCallback(httpClientBuilder ->
+              httpClientBuilder.setSSLContext(sslContext));
           }
           client = new RestHighLevelClient(builder);
         }
